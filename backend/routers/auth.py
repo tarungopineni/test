@@ -9,6 +9,7 @@ import datetime
 from datetime import timezone,timedelta
 from jose import jwt
 from pydantic import BaseModel
+from ..models import *
 
 router = APIRouter(
     prefix="/auth",
@@ -45,3 +46,21 @@ ALGORITHM = 'HS256'
 class UserRequest(BaseModel):
     manager_id:int
     name:str
+    email:str
+    username:str
+    first_name:str
+    last_name:str
+    hashed_password:str
+    role:str
+
+@router.post("/create")
+async def create_user(db:db_dependency,user:UserRequest):
+    user.hashed_password = bcrypt_context.hash(user.hashed_password)
+    final_model = Users(**user.model_dump())
+    db.add(final_model)
+    db.commit()
+    return {"message": "User inserted!!"}
+
+@router.get("/users")
+async def get_all_users(db: db_dependency):
+    return db.query(Users).all()
