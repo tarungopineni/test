@@ -24,8 +24,8 @@ class Tasks(Base):
     description = Column(String)
     priority = Column(String)  # LOW, MEDIUM, HIGH
     completed = Column(Boolean, default=False)
-    manager_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    assignee_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    manager_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    assignee_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     deadline = Column(DateTime, nullable=True)
     deadline_text = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -34,3 +34,13 @@ class Tasks(Base):
         default=datetime.utcnow,
         onupdate=datetime.utcnow
     )
+
+class Meetings(Base):
+    __tablename__ = "meetings"
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String, nullable=False)
+    uploaded_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    audio_file_path = Column(String, nullable=False)
+    transcript = Column(String, nullable=True)
+    summary = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)

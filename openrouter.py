@@ -13,80 +13,96 @@ def generate_summary(transcript: str) -> str:
         base_url="https://openrouter.ai/api/v1"
     )
 
-    prompt = f"""
+    prompt = f'''
 You are an expert project manager and meeting analyst.
 
-Your task is to analyze the meeting transcript and extract structured information.
+Analyze the meeting transcript and extract structured information.
 
-Follow these steps EXACTLY:
+Follow these rules carefully.
 
 STEP 1 - Identify Participants
-- Find all people mentioned in the meeting.
-- Record their names and roles if available.
+
+* Extract all participants mentioned in the meeting.
+* Include role if explicitly stated.
+* Do not invent participants.
 
 STEP 2 - Identify Decisions
-- Extract only decisions that were explicitly made.
-- Do not infer decisions.
+
+* Extract only decisions explicitly made during the meeting.
+* Do not infer decisions.
 
 STEP 3 - Identify Risks and Blockers
-- Extract risks, blockers, concerns, dependencies, and issues discussed.
-- Include owner if explicitly mentioned.
 
-STEP 4 - Extract Action Items
-For every action item:
+* Extract risks, blockers, concerns, dependencies, and issues.
+* Include owner only if explicitly mentioned.
+
+STEP 4 - Extract Tasks
+
+For every task:
 
 1. Identify the assignee.
-2. Identify the task.
-3. Identify the deadline.
-4. Identify who assigned the task if mentioned.
+2. Identify the task title.
+3. Generate a short task description.
+4. Identify the deadline if explicitly mentioned.
+5. Determine priority:
 
-IMPORTANT:
-- Never invent tasks.
-- Never infer deadlines.
-- Never create tasks from meeting announcements.
-- Never create tasks from future possibilities.
-- Only extract actions explicitly assigned in the meeting.
-- If deadline is not explicitly mentioned, use "Not Mentioned".
-- If assigner is not explicitly mentioned, use "Not Mentioned".
+   * HIGH
+   * MEDIUM
+   * LOW
+6. Identify who assigned the task if explicitly mentioned.
 
-STEP 5 - Create Summary
-Generate a concise summary of the meeting in 3-5 sentences.
+Rules:
+
+* Never invent tasks.
+* Never infer deadlines.
+* Never create tasks from general discussion.
+* Never create tasks from future possibilities.
+* Only include tasks that were explicitly assigned.
+* If deadline is not mentioned, use "Not Mentioned".
+* If assigner is not mentioned, use "Not Mentioned".
+* If priority cannot be determined, use "MEDIUM".
+
+STEP 5 - Generate Summary
+
+Create a concise summary in 3-5 sentences.
 
 Return ONLY valid JSON.
 
 JSON Schema:
 
 {{
-    "summary": "",
-    "participants": [
-        {{
-            "name": "",
-            "role": ""
-        }}
-    ],
-    "decisions": [
-        ""
-    ],
-    "risks": [
-        {{
-            "description": "",
-            "owner": ""
-        }}
-    ],
-    "tasks": [
-        {{
-            "assignee": "",
-            "assigned_by": "",
-            "task": "",
-            "deadline": ""
-        }}
-    ]
+"summary": "",
+"participants": [
+{{
+"name": "",
+"role": ""
+}}
+],
+"decisions": [
+""
+],
+"risks": [
+{{
+"description": "",
+"owner": ""
+}}
+],
+"tasks": [
+{{
+"assignee_name": "",
+"assigned_by": "",
+"title": "",
+"description": "",
+"priority": "HIGH|MEDIUM|LOW",
+"deadline": ""
+}}
+]
 }}
 
 Meeting Transcript:
 
-{transcript}
-"""
+{{transcript}}
+'''
 
     response = client.chat.completions.create(
         model="openai/gpt-oss-120b:free",
