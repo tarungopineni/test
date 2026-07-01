@@ -1,9 +1,17 @@
+import json
 from openai import OpenAI
 from dotenv import load_dotenv
 import os
-import datetime
+from datetime import datetime, timedelta
+from backend.routers.tasks import create_task_db, TaskRequest
+from typing import Annotated
+from sqlalchemy.orm import Session
+from fastapi import Depends
+from backend.database import SessionLocal
+
 load_dotenv()
-def generate_summary(transcript: str) -> str:
+
+def generate_summary(transcript: str,meeting_datetime: str,team_members: list[dict]) -> str:
     """
     Generate meeting summary using OpenRouter GPT-OSS-120B.
     """
@@ -13,96 +21,130 @@ def generate_summary(transcript: str) -> str:
         base_url="https://openrouter.ai/api/v1"
     )
 
-    prompt = f'''
+    prompt = f"""
 You are an expert project manager and meeting analyst.
 
-Analyze the meeting transcript and extract structured information.
+The meeting occurred at:
 
-Follow these rules carefully.
+{meeting_datetime}
+
+The authenticated user is the meeting manager.
+
+The following team members belong to this manager:
+
+{team_members}
+
+IMPORTANT:
+
+- Only assign tasks to people from the team_members list.
+- Use the provided IDs.
+- Never invent IDs.
+- Never invent employees.
+- If an assignee cannot be matched to a team member, do not create the task.
 
 STEP 1 - Identify Participants
 
-* Extract all participants mentioned in the meeting.
-* Include role if explicitly stated.
-* Do not invent participants.
+- Extract all participants mentioned in the meeting.
+- Include role if explicitly mentioned.
 
 STEP 2 - Identify Decisions
 
-* Extract only decisions explicitly made during the meeting.
-* Do not infer decisions.
+- Extract only decisions explicitly made.
+- Do not infer decisions.
 
-STEP 3 - Identify Risks and Blockers
+STEP 3 - Identify Risks
 
-* Extract risks, blockers, concerns, dependencies, and issues.
-* Include owner only if explicitly mentioned.
+- Extract risks, blockers, concerns, dependencies, and issues.
+- Include owner if explicitly mentioned.
 
 STEP 4 - Extract Tasks
 
-For every task:
+For every explicitly assigned task:
 
-1. Identify the assignee.
-2. Identify the task title.
-3. Generate a short task description.
-4. Identify the deadline if explicitly mentioned.
-5. Determine priority:
+- Create a short title.
+- Create a description.
+- Determine priority:
+  - HIGH
+  - MEDIUM
+  - LOW
+- Determine assignee_id from the provided team_members.
+- Determine assigned_by.
+- Set completed to false.
 
-   * HIGH
-   * MEDIUM
-   * LOW
-6. Identify who assigned the task if explicitly mentioned.
+Deadline Rules:
 
-Rules:
+- Convert relative deadlines using the meeting datetime.
+- Examples:
+  - tomorrow afternoon
+  - Friday evening
+  - next Tuesday
+  - before Wednesday
 
-* Never invent tasks.
-* Never infer deadlines.
-* Never create tasks from general discussion.
-* Never create tasks from future possibilities.
-* Only include tasks that were explicitly assigned.
-* If deadline is not mentioned, use "Not Mentioned".
-* If assigner is not mentioned, use "Not Mentioned".
-* If priority cannot be determined, use "MEDIUM".
+- Return deadline as:
+
+YYYY-MM-DDTHH:MM:SS
+
+- Preserve original wording in deadline_text.
+
+- If deadline is not explicitly mentioned:
+
+deadline = null
+deadline_text = null
+
+Task Rules:
+
+- Never invent tasks.
+- Never infer tasks.
+- Only include tasks explicitly assigned.
+- Do not duplicate tasks repeated during meeting recap.
+- If assigned_by is not explicitly mentioned, use "Not Mentioned".
+- If priority cannot be determined, use "MEDIUM".
 
 STEP 5 - Generate Summary
 
-Create a concise summary in 3-5 sentences.
+Create a concise 3-5 sentence summary.
 
 Return ONLY valid JSON.
+No markdown.
+No explanations.
 
 JSON Schema:
 
 {{
-"summary": "",
-"participants": [
-{{
-"name": "",
-"role": ""
-}}
-],
-"decisions": [
-""
-],
-"risks": [
-{{
-"description": "",
-"owner": ""
-}}
-],
-"tasks": [
-{{
-"assignee_name": "",
-"assigned_by": "",
-"title": "",
-"description": "",
-"priority": "HIGH|MEDIUM|LOW",
-"deadline": ""
-}}
-]
+    "summary": "",
+    "participants": [
+        {{
+            "name": "",
+            "role": ""
+        }}
+    ],
+    "decisions": [
+        ""
+    ],
+    "risks": [
+        {{
+            "description": "",
+            "owner": ""
+        }}
+    ],
+    "tasks": [
+        {{
+            "title": "",
+            "description": "",
+            "priority": "HIGH|MEDIUM|LOW",
+            "completed": false,
+            "assignee_id": 0,
+            "assigned_by": "",
+            "deadline": null,
+            "deadline_text": null
+        }}
+    ]
 }}
 
 Meeting Transcript:
 
-{{transcript}}
-'''
+{transcript}
+"""
 
     response = client.chat.completions.create(
         model="openai/gpt-oss-120b:free",
@@ -211,5 +253,108 @@ Arun will prepare a database scaling proposal before Wednesday.
 Anita will continue dashboard development once analytics APIs and requirements are available.
 
 Thank you everyone. Let's meet again next Tuesday.'''
+team_members = [
+    {
+        "id": 1,
+        "name": "John"
+    },
+    {
+        "id": 2,
+        "name": "Priya"
+    },
+    {
+        "id": 3,
+        "name": "Anita"
+    },
+    {
+        "id": 4,
+        "name": "Arun"
+    }
+]
 
-print(generate_summary(transcript))
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+db_dependency = Annotated[Session, Depends(get_db)]
+# content = generate_summary(transcript,datetime.now().isoformat(),team_members)
+content = """
+{
+    "summary": "The team reviewed progress on the employee management system. John will finish RBAC and deploy authentication to staging on Friday evening. Arun will prepare a database scaling proposal before Wednesday, while the product requirements and analytics API work remain pending. The next meeting is scheduled for next Tuesday.",
+    "participants": [
+        {
+            "name": "Rahul",
+            "role": "Project Manager"
+        },
+        {
+            "name": "John",
+            "role": "Backend Developer"
+        },
+        {
+            "name": "Priya",
+            "role": "QA Engineer"
+        },
+        {
+            "name": "Anita",
+            "role": "Frontend Developer"
+        },
+        {
+            "name": "Arun",
+            "role": "DevOps Engineer"
+        }
+    ],
+    "decisions": [
+        "Analytics APIs become the highest priority after authentication.",
+        "Rahul will speak with the product manager today and get the finalized requirements document by tomorrow afternoon.",
+        "The team will meet again next Tuesday."
+    ],
+    "risks": [
+        {
+            "description": "Database utilization is at eighty-two percent and may hit storage limits within the next six to eight weeks.",
+            "owner": "Arun"
+        },
+        {
+            "description": "Final leave management requirements are not yet received, which could block dashboard screens.",
+            "owner": "Priya"
+        }
+    ],
+    "tasks": [
+        {
+            "title": "Prepare database scaling proposal",
+            "description": "Create and share a proposal for scaling the database to handle projected growth.",
+            "priority": "MEDIUM",
+            "completed": false,
+            "assignee_id": 1,
+            "assigned_by": "Rahul",
+            "deadline": "2026-07-06T23:59:59",
+            "deadline_text": "before Wednesday"
+        }
+    ]
+}
+"""
+print(content)
+data = json.loads(content)
+
+print(data["summary"])
+print(data["tasks"])
+db = SessionLocal()
+try:
+    for task in data["tasks"]:
+        create_task_db(
+            TaskRequest(
+                title=task["title"],
+                description=task["description"],
+                priority=task["priority"],
+                manager_id=1,
+                assignee_id=task["assignee_id"],
+                deadline=task["deadline"],
+                deadline_text=task["deadline_text"],
+                completed=task["completed"]
+            ),
+            db
+        )
+finally:
+    db.close()
