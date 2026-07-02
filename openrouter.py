@@ -11,7 +11,7 @@ from backend.database import SessionLocal
 
 load_dotenv()
 
-def generate_summary(transcript: str,meeting_datetime: str,team_members: list[dict]) -> str:
+def generate_summary(transcript: str,meeting_datetime: str,team_members: dict) -> str:
     """
     Generate meeting summary using OpenRouter GPT-OSS-120B.
     """
@@ -28,123 +28,281 @@ The meeting occurred at:
 
 {meeting_datetime}
 
-The authenticated user is the meeting manager.
-
-The following team members belong to this manager:
+Known Participants (Name → ID Mapping):
 
 {team_members}
 
-IMPORTANT:
+CRITICAL RULES
 
-- Only assign tasks to people from the team_members list.
-- Use the provided IDs.
-- Never invent IDs.
-- Never invent employees.
-- If an assignee cannot be matched to a team member, do not create the task.
+* Use ONLY participant IDs from the provided participant list.
+* Never invent IDs.
+* Never invent participants.
+* Never return manager names or assignee names inside tasks.
+* Tasks must contain only numeric IDs.
+* Participants may appear in the transcript who are NOT present in the provided participant list.
+* Such participants may still appear in the participants section.
+* However, tasks may only be created when BOTH manager and assignee can be matched to IDs from the provided participant list.
+* If either manager or assignee cannot be matched, DO NOT create the task.
+* Never output manager_id = 0.
+* Never output assignee_id = 0.
+* Omit invalid tasks entirely.
 
-STEP 1 - Identify Participants
+────────────────────────────
 
-- Extract all participants mentioned in the meeting.
-- Include role if explicitly mentioned.
+STEP 1 — PARTICIPANTS
 
-STEP 2 - Identify Decisions
+Extract all participants explicitly mentioned in the meeting.
 
-- Extract only decisions explicitly made.
-- Do not infer decisions.
+For each participant return:
 
-STEP 3 - Identify Risks
+* name
+* role
 
-- Extract risks, blockers, concerns, dependencies, and issues.
-- Include owner if explicitly mentioned.
+If role is not mentioned, return null.
 
-STEP 4 - Extract Tasks
+────────────────────────────
 
-For every explicitly assigned task:
+STEP 2 — DECISIONS
 
-- Create a short title.
-- Create a description.
-- Determine priority:
-  - HIGH
-  - MEDIUM
-  - LOW
-- Determine assignee_id from the provided team_members.
-- Determine assigned_by.
-- Set completed to false.
+Extract only decisions that were explicitly made.
 
-Deadline Rules:
+Do NOT infer decisions.
 
-- Convert relative deadlines using the meeting datetime.
-- Examples:
-  - tomorrow afternoon
-  - Friday evening
-  - next Tuesday
-  - before Wednesday
+Examples:
 
-- Return deadline as:
+Valid:
+
+* "Analytics APIs become the highest priority after authentication."
+
+Invalid:
+
+* "The team will probably focus on analytics next."
+
+────────────────────────────
+
+STEP 3 — RISKS / BLOCKERS
+
+Extract:
+
+* risks
+* blockers
+* concerns
+* dependencies
+* issues
+
+For each risk return:
+
+* description
+* owner
+
+If owner is not explicitly mentioned:
+
+owner = null
+
+────────────────────────────
+
+STEP 4 — TASK EXTRACTION
+
+Extract ONLY explicitly assigned tasks.
+
+A task exists only when someone is clearly responsible for performing an action.
+
+Examples:
+
+"John will complete RBAC by Friday."
+
+Create task.
+
+"Arun, prepare a database scaling proposal."
+
+Create task.
+
+"Analytics APIs are important."
+
+Do NOT create task.
+
+"Dashboard depends on analytics APIs."
+
+Do NOT create task.
+
+────────────────────────────
+
+TASK FIELDS
+
+For every valid task determine:
+
+* title
+* description
+* priority
+* manager_id
+* assignee_id
+* deadline
+* deadline_text
+
+DO NOT include:
+
+* manager_name
+* assignee_name
+* assigned_by
+* assigned_to
+
+────────────────────────────
+
+MANAGER / ASSIGNEE RULES
+
+manager_id = ID of the person assigning the task.
+
+assignee_id = ID of the person responsible for completing the task.
+
+Examples:
+
+Rahul:
+"John, deploy authentication by Friday."
+
+manager_id = Rahul's ID
+assignee_id = John's ID
+
+John:
+"Priya, test authentication after deployment."
+
+manager_id = John's ID
+assignee_id = Priya's ID
+
+Meeting recap:
+
+"John will complete RBAC by Friday."
+
+Treat as:
+
+manager_id = Rahul's ID
+assignee_id = John's ID
+
+only if the recap clearly reflects an assignment made during the meeting.
+
+If manager or assignee cannot be matched to an ID:
+
+DO NOT CREATE THE TASK.
+
+────────────────────────────
+
+PRIORITY RULES
+
+Use only:
+
+* HIGH
+* MEDIUM
+* LOW
+
+Use HIGH when:
+
+* explicitly stated as highest priority
+* urgent blockers
+* critical path work
+
+Use MEDIUM when priority is unclear.
+
+Use LOW only when clearly low priority.
+
+────────────────────────────
+
+COMPLETION RULES
+
+Assume all extracted tasks are incomplete.
+
+Do NOT include a completed field in the output.
+
+────────────────────────────
+
+DEADLINE RULES
+
+Use the meeting datetime as the reference date.
+
+Convert relative dates such as:
+
+* tomorrow
+* Friday
+* Friday evening
+* next Tuesday
+* before Wednesday
+* in 3 days
+
+to:
 
 YYYY-MM-DDTHH:MM:SS
 
-- Preserve original wording in deadline_text.
+Examples:
 
-- If deadline is not explicitly mentioned:
+deadline = "2026-07-05T18:00:00"
+deadline_text = "Friday evening"
+
+If no deadline is explicitly mentioned:
 
 deadline = null
 deadline_text = null
 
-Task Rules:
+────────────────────────────
 
-- Never invent tasks.
-- Never infer tasks.
-- Only include tasks explicitly assigned.
-- Do not duplicate tasks repeated during meeting recap.
-- If assigned_by is not explicitly mentioned, use "Not Mentioned".
-- If priority cannot be determined, use "MEDIUM".
+DUPLICATION RULES
 
-STEP 5 - Generate Summary
+Do not duplicate tasks.
 
-Create a concise 3-5 sentence summary.
+If a task appears again during a recap, return it only once.
+
+────────────────────────────
+
+STEP 5 — SUMMARY
+
+Generate a concise 3–5 sentence summary of the meeting.
+
+────────────────────────────
+
+OUTPUT RULES
 
 Return ONLY valid JSON.
+
 No markdown.
 No explanations.
+No comments.
+No extra text.
 
-JSON Schema:
+JSON Schema
 
 {{
-    "summary": "",
-    "participants": [
-        {{
-            "name": "",
-            "role": ""
-        }}
-    ],
-    "decisions": [
-        ""
-    ],
-    "risks": [
-        {{
-            "description": "",
-            "owner": ""
-        }}
-    ],
-    "tasks": [
-        {{
-            "title": "",
-            "description": "",
-            "priority": "HIGH|MEDIUM|LOW",
-            "completed": false,
-            "assignee_id": 0,
-            "assigned_by": "",
-            "deadline": null,
-            "deadline_text": null
-        }}
-    ]
+"summary": "",
+"participants": [
+{{
+"name": "",
+"role": ""
+}}
+],
+"decisions": [
+""
+],
+"risks": [
+{{
+"description": "",
+"owner": ""
+}}
+],
+"tasks": [
+{{
+"title": "",
+"description": "",
+"priority": "HIGH|MEDIUM|LOW",
+"completed": false,
+"manager_id": 0,
+"assignee_id": 0,
+"deadline": null,
+"deadline_text": null
+}}
+]
 }}
 
 Meeting Transcript:
 
 {transcript}
 """
+
 
     response = client.chat.completions.create(
         model="openai/gpt-oss-120b:free",
@@ -253,127 +411,17 @@ Arun will prepare a database scaling proposal before Wednesday.
 Anita will continue dashboard development once analytics APIs and requirements are available.
 
 Thank you everyone. Let's meet again next Tuesday.'''
-team_members = [
-    {
-        "id": 1,
-        "name": "John"
-    },
-    {
-        "id": 2,
-        "name": "Priya"
-    },
-    {
-        "id": 3,
-        "name": "Anita"
-    },
-    {
-        "id": 4,
-        "name": "Arun"
-    }
-]
 
-# content = generate_summary(transcript,datetime.now().isoformat(),team_members)
-content = """
-{
-    "summary": "The team reviewed progress on the employee management system. John will finish RBAC and deploy authentication to staging by Friday, then begin analytics API work. Priya will complete authentication testing by Monday, Rahul will obtain leave management requirements by tomorrow afternoon, and Arun will deliver a database scaling proposal before Wednesday. Analytics APIs were designated as the highest priority after authentication.",
-    "participants": [
-        {
-            "name": "Rahul",
-            "role": "Project Manager"
-        },
-        {
-            "name": "John",
-            "role": "Backend Developer"
-        },
-        {
-            "name": "Priya",
-            "role": "QA Engineer"
-        },
-        {
-            "name": "Anita",
-            "role": "Frontend Developer"
-        },
-        {
-            "name": "Arun",
-            "role": "DevOps Engineer"
-        }
-    ],
-    "decisions": [
-        "Analytics APIs become the highest priority after authentication."
-    ],
-    "risks": [
-        {
-            "description": "Database utilization is at 82% and may hit storage limits within the next six to eight weeks.",
-            "owner": "Arun"
-        },
-        {
-            "description": "Final leave management requirements are not yet received, impacting dashboard screens.",
-            "owner": "Priya"
-        }
-    ],
-    "tasks": [
-        {
-            "title": "Complete role-based access control (RBAC)",
-            "description": "Implement RBAC for the authentication service.",
-            "priority": "HIGH",
-            "completed": false,
-            "assignee_id": 1,
-            "assigned_by": "Rahul",
-            "deadline": "2026-07-05T23:59:59",
-            "deadline_text": "by Friday"
-        },
-        {
-            "title": "Deploy authentication service to staging",
-            "description": "Deploy the completed authentication service to the staging environment.",
-            "priority": "HIGH",
-            "completed": false,
-            "assignee_id": 1,
-            "assigned_by": "Rahul",
-            "deadline": "2026-07-05T18:00:00",
-            "deadline_text": "Friday evening"
-        },
-        {
-            "title": "Complete authentication testing",
-            "description": "Test the authentication service after deployment.",
-            "priority": "MEDIUM",
-            "completed": false,
-            "assignee_id": 2,
-            "assigned_by": "Rahul",
-            "deadline": "2026-07-06T23:59:59",
-            "deadline_text": "by Monday"
-        },
-        {
-            "title": "Obtain finalized leave management requirements",
-            "description": "Gather the final leave management requirements from the product team.",
-            "priority": "MEDIUM",
-            "completed": false,
-            "assignee_id": 0,
-            "assigned_by": "Rahul",
-            "deadline": "2026-07-03T15:00:00",
-            "deadline_text": "by tomorrow afternoon"
-        },
-        {
-            "title": "Prepare database scaling proposal",
-            "description": "Create a proposal for scaling the database to handle future growth.",
-            "priority": "MEDIUM",
-            "completed": false,
-            "assignee_id": 4,
-            "assigned_by": "Rahul",
-            "deadline": "2026-07-08T00:00:00",
-            "deadline_text": "before Wednesday"
-        },
-        {
-            "title": "Start analytics APIs development",
-            "description": "Begin development of analytics APIs after authentication deployment.",
-            "priority": "HIGH",
-            "completed": false,
-            "assignee_id": 1,
-            "assigned_by": "Rahul",
-            "deadline": null,
-            "deadline_text": null
-        }
-    ]
+d = {
+    "Rahul": 5,
+    "John": 1,
+    "Priya": 2,
+    "Anita": 3,
+    "Arun": 4
 }
-"""
+
+content = generate_summary(transcript,datetime.now().isoformat(),d)
+
 print(content)
 data = json.loads(content)
+print(data)

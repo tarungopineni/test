@@ -3,10 +3,11 @@ from typing_extensions import Annotated
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from ..database import SessionLocal
-from ..models import Meetings
+from ..models import *
 from pydantic import BaseModel
 from datetime import datetime
-from .auth import get_current_user,TaskRequest
+from .auth import get_current_user
+from .tasks import TaskRequest, create_task_db
 from ..models import Tasks
 import json
 from openai import OpenAI
@@ -18,7 +19,7 @@ import os
 
 load_dotenv()
 
-def generate_summary(transcript: str,meeting_datetime: str,team_members: list[dict]) -> str:
+def generate_summary(transcript: str,meeting_datetime: str,team_members: dict) -> str:
     """
     Generate meeting summary using OpenRouter GPT-OSS-120B.
     """
@@ -347,110 +348,109 @@ team_members = [
 ]
 
 # content = generate_summary(transcript,datetime.now().isoformat(),team_members)
-content = """
-{
-    "summary": "The team reviewed progress on the employee management system. John will finish RBAC and deploy authentication to staging by Friday, then begin analytics API work. Priya will complete authentication testing by Monday, Rahul will obtain leave management requirements by tomorrow afternoon, and Arun will deliver a database scaling proposal before Wednesday. Analytics APIs were designated as the highest priority after authentication.",
-    "participants": [
-        {
-            "name": "Rahul",
-            "role": "Project Manager"
-        },
-        {
-            "name": "John",
-            "role": "Backend Developer"
-        },
-        {
-            "name": "Priya",
-            "role": "QA Engineer"
-        },
-        {
-            "name": "Anita",
-            "role": "Frontend Developer"
-        },
-        {
-            "name": "Arun",
-            "role": "DevOps Engineer"
-        }
-    ],
-    "decisions": [
-        "Analytics APIs become the highest priority after authentication."
-    ],
-    "risks": [
-        {
-            "description": "Database utilization is at 82% and may hit storage limits within the next six to eight weeks.",
-            "owner": "Arun"
-        },
-        {
-            "description": "Final leave management requirements are not yet received, impacting dashboard screens.",
-            "owner": "Priya"
-        }
-    ],
-    "tasks": [
-        {
-            "title": "Complete role-based access control (RBAC)",
-            "description": "Implement RBAC for the authentication service.",
-            "priority": "HIGH",
-            "completed": false,
-            "assignee_id": 1,
-            "assigned_by": "Rahul",
-            "deadline": "2026-07-05T23:59:59",
-            "deadline_text": "by Friday"
-        },
-        {
-            "title": "Deploy authentication service to staging",
-            "description": "Deploy the completed authentication service to the staging environment.",
-            "priority": "HIGH",
-            "completed": false,
-            "assignee_id": 1,
-            "assigned_by": "Rahul",
-            "deadline": "2026-07-05T18:00:00",
-            "deadline_text": "Friday evening"
-        },
-        {
-            "title": "Complete authentication testing",
-            "description": "Test the authentication service after deployment.",
-            "priority": "MEDIUM",
-            "completed": false,
-            "assignee_id": 2,
-            "assigned_by": "Rahul",
-            "deadline": "2026-07-06T23:59:59",
-            "deadline_text": "by Monday"
-        },
-        {
-            "title": "Obtain finalized leave management requirements",
-            "description": "Gather the final leave management requirements from the product team.",
-            "priority": "MEDIUM",
-            "completed": false,
-            "assignee_id": 0,
-            "assigned_by": "Rahul",
-            "deadline": "2026-07-03T15:00:00",
-            "deadline_text": "by tomorrow afternoon"
-        },
-        {
-            "title": "Prepare database scaling proposal",
-            "description": "Create a proposal for scaling the database to handle future growth.",
-            "priority": "MEDIUM",
-            "completed": false,
-            "assignee_id": 4,
-            "assigned_by": "Rahul",
-            "deadline": "2026-07-08T00:00:00",
-            "deadline_text": "before Wednesday"
-        },
-        {
-            "title": "Start analytics APIs development",
-            "description": "Begin development of analytics APIs after authentication deployment.",
-            "priority": "HIGH",
-            "completed": false,
-            "assignee_id": 1,
-            "assigned_by": "Rahul",
-            "deadline": null,
-            "deadline_text": null
-        }
-    ]
+content = """{
+  "summary": "The team reviewed progress on the employee management system. John will complete RBAC and deploy the authentication service to staging by Friday, after which analytics API development will begin. Priya will test the authentication service after deployment and complete testing by Monday. Rahul will obtain finalized leave management requirements, while Arun will prepare a database scaling proposal due to storage utilization concerns. Analytics APIs were designated as the highest priority after authentication work.",
+  "participants": [
+    {
+      "name": "Rahul",
+      "role": "Project Manager"
+    },
+    {
+      "name": "John",
+      "role": "Backend Developer"
+    },
+    {
+      "name": "Priya",
+      "role": "QA Engineer"
+    },
+    {
+      "name": "Anita",
+      "role": "Frontend Developer"
+    },
+    {
+      "name": "Arun",
+      "role": "DevOps Engineer"
+    }
+  ],
+  "decisions": [
+    "Analytics APIs become the highest priority after authentication."
+  ],
+  "risks": [
+    {
+      "description": "Database utilization is already at 82% and may hit storage limits within six to eight weeks.",
+      "owner": "Arun"
+    },
+    {
+      "description": "Final leave management requirements from the product team are not yet available and are blocking dependent dashboard work.",
+      "owner": "Priya"
+    }
+  ],
+  "tasks": [
+    {
+      "title": "Complete RBAC implementation",
+      "description": "Implement role-based access control for the authentication service.",
+      "priority": "HIGH",
+      "completed": false,
+      "manager_id": 7,
+      "assignee_id": 3,
+      "deadline": "2026-07-03T23:59:59",
+      "deadline_text": "by Friday"
+    },
+    {
+      "title": "Deploy authentication service to staging",
+      "description": "Deploy the authentication service to the staging environment after RBAC completion.",
+      "priority": "HIGH",
+      "completed": false,
+      "manager_id": 7,
+      "assignee_id": 3,
+      "deadline": "2026-07-03T18:00:00",
+      "deadline_text": "Friday evening"
+    },
+    {
+      "title": "Complete authentication testing",
+      "description": "Test the authentication service after deployment and complete validation.",
+      "priority": "MEDIUM",
+      "completed": false,
+      "manager_id": 7,
+      "assignee_id": 4,
+      "deadline": "2026-07-06T23:59:59",
+      "deadline_text": "by Monday"
+    },
+    {
+      "title": "Obtain finalized leave management requirements",
+      "description": "Coordinate with the product manager and obtain the finalized leave management requirements document.",
+      "priority": "MEDIUM",
+      "completed": false,
+      "manager_id": 7,
+      "assignee_id": 7,
+      "deadline": "2026-07-01T15:00:00",
+      "deadline_text": "by tomorrow afternoon"
+    },
+    {
+      "title": "Start analytics API development",
+      "description": "Begin development of analytics APIs after authentication deployment.",
+      "priority": "HIGH",
+      "completed": false,
+      "manager_id": 7,
+      "assignee_id": 3,
+      "deadline": null,
+      "deadline_text": null
+    },
+    {
+      "title": "Prepare database scaling proposal",
+      "description": "Create and share a database scaling proposal to address future storage growth.",
+      "priority": "MEDIUM",
+      "completed": false,
+      "manager_id": 7,
+      "assignee_id": 6,
+      "deadline": "2026-07-08T00:00:00",
+      "deadline_text": "before Wednesday"
+    }
+  ]
 }
 """
-print(content)
-data = json.loads(content)
+# print(content)
+# data = json.loads(content)
 # =====================================================================================================================
 
 
@@ -468,19 +468,6 @@ def get_db():
 
 db_dependency = Annotated[Session, Depends(get_db)]
 user_dependency = Annotated[dict,Depends(get_current_user)]
-
-def create_task_db(task: TaskRequest, db):
-    model = Tasks(
-        title=task.title,
-        description=task.description,
-        priority=task.priority,
-        manager_id=task.manager_id,
-        assignee_id=task.assignee_id,
-        deadline=task.deadline,
-        deadline_text=task.deadline_text,
-    )
-    db.add(model)
-    db.commit()
 
 def create_tasks_from_summary(
     json_data: dict,
@@ -502,10 +489,15 @@ def create_tasks_from_summary(
         )
 
 @router.post("/create")
-async def create_meeting(title: str,summary: str,db: db_dependency,user: user_dependency):
+async def create_meeting(title: str,db: db_dependency,transcript:str):
+    d = {u.name: u.id for u in db.query(Users).all()}
+    # content = generate_summary(transcript,datetime.now().isoformat(),d)
+    data = json.loads(content)
     meeting = Meetings(
         title=title,
-        summary=summary
+        summary=content,
+        audio_file_path=None,
+        transcript=transcript
     )
     db.add(meeting)
     for task in data["tasks"]:
@@ -514,9 +506,9 @@ async def create_meeting(title: str,summary: str,db: db_dependency,user: user_de
                 title=task["title"],
                 description=task["description"],
                 priority=task["priority"],
-                manager_id=user["id"],
+                manager_id=task["manager_id"],
                 assignee_id=task["assignee_id"],
-                deadline=task["deadline"],
+                deadline=datetime.fromisoformat(task["deadline"]) if task["deadline"] else None,
                 deadline_text=task["deadline_text"],
                 completed=task["completed"]
             ),
@@ -525,4 +517,5 @@ async def create_meeting(title: str,summary: str,db: db_dependency,user: user_de
     db.commit()
     db.refresh(meeting)
 
-    return meeting
+    # return meeting
+    return {"message": "Meeting summary and tasks created successfully."}

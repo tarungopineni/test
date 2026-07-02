@@ -70,7 +70,7 @@ async def create_task(user:user_dependency,task:TaskRequest,db:db_dependency):
 
 @router.get("/get_tasks",status_code=status.HTTP_200_OK)
 async def get_all_tasks(user:user_dependency,db:db_dependency):
-    return db.query(Tasks).all()
+    return db.query(Tasks).filter(Tasks.assignee_id == user["id"]).all()
 
 @router.get("/get_task/{task_id}",status_code=status.HTTP_200_OK)
 async def get_task_by_id(user:user_dependency,task_id:int,db:db_dependency):

@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 from ..database import SessionLocal
 from passlib.context import CryptContext
-from typing import Annotated
+from typing import Annotated, Optional
 from sqlalchemy.orm import Session
 from fastapi import Depends, HTTPException,Request
 import datetime
@@ -28,7 +28,7 @@ db_dependency = Annotated[Session, Depends(get_db)]
 user_dependency = Annotated[dict,Depends(get_current_user)]
 
 class UserRequest(BaseModel):
-    manager_id:int
+    manager_id: Optional[int] = None
     name:str
     email:str
     username:str

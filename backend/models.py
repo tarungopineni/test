@@ -39,8 +39,7 @@ class Meetings(Base):
     __tablename__ = "meetings"
     id = Column(Integer, primary_key=True, index=True)
     title = Column(String, nullable=False)
-    uploaded_by = Column(Integer, ForeignKey("users.id"), nullable=False)
-    audio_file_path = Column(String, nullable=False)
+    audio_file_path = Column(String, nullable=True)
     transcript = Column(String, nullable=True)
     summary = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
