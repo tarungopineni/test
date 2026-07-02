@@ -112,3 +112,17 @@ async def update_task_status(user:user_dependency,task_id:int,task:TaskStatusReq
     model.priority = task.priority
     model.completed = task.completed
     db.commit()
+
+@router.post("/assign_task_to_employee/{employee_id}",status_code=status.HTTP_204_NO_CONTENT)
+async def assign_task_to_employee(user:user_dependency,employee_id:int,task:TaskRequest,db:db_dependency):
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,detail = "user not authenticated")
+    model = db.query(Users).filter(Users.id == employee_id).first()
+    if model is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,detail="employee not found")
+    if model.manager_id != user["id"]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,detail="You are not authorized to assign tasks to this employee")
+    task.assignee_id = employee_id
+    task.manager_id = user["id"]
+    create_task_db(task,db)
+    db.commit()

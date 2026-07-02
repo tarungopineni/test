@@ -72,6 +72,20 @@ async def update_user(user:user_dependency,db:db_dependency,req:UserRequest):
     db.add(model)
     db.commit()
 
+@router.put("/update_user_manager/{user_id}",status_code=status.HTTP_204_NO_CONTENT)
+async def update_user_manager(user:user_dependency,db:db_dependency,manager_id: int):
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,detail = "user not authenticated")
+    model = db.query(Users).filter(Users.id == user["id"]).first()
+    if model is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,detail="user not found")
+    manager = db.query(Users).filter(Users.id == manager_id).first()
+    if manager is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,detail="manager not found")
+    model.manager_id = manager_id
+    db.add(model)
+    db.commit()
+
 @router.delete("/delete_user/{user_id}",status_code=status.HTTP_204_NO_CONTENT)
 async def delete_user(user:user_dependency,db:db_dependency,user_id:int):
     if user is None:
