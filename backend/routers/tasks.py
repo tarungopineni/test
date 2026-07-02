@@ -64,25 +64,6 @@ def create_task_db(task: TaskRequest, db):
     db.add(model)
     db.commit()
 
-def create_tasks_from_summary(
-    json_data: dict,
-    manager_id: int,
-    db
-):
-    for task in json_data.get("tasks", []):
-        create_task_db(
-            TaskRequest(
-                title=task["title"],
-                description=task["description"],
-                priority=task["priority"],
-                manager_id=manager_id,
-                assignee_id=task["assignee_id"],
-                deadline=task.get("deadline"),
-                deadline_text=task.get("deadline_text")
-            ),
-            db
-        )
-
 @router.post("/create_task",status_code=status.HTTP_201_CREATED)
 async def create_task(user:user_dependency,task:TaskRequest,db:db_dependency):
     return create_task_db(task,db)

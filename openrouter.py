@@ -272,18 +272,10 @@ team_members = [
     }
 ]
 
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-db_dependency = Annotated[Session, Depends(get_db)]
 # content = generate_summary(transcript,datetime.now().isoformat(),team_members)
 content = """
 {
-    "summary": "The team reviewed progress on the employee management system. John will finish RBAC and deploy authentication to staging on Friday evening. Arun will prepare a database scaling proposal before Wednesday, while the product requirements and analytics API work remain pending. The next meeting is scheduled for next Tuesday.",
+    "summary": "The team reviewed progress on the employee management system. John will finish RBAC and deploy authentication to staging by Friday, then begin analytics API work. Priya will complete authentication testing by Monday, Rahul will obtain leave management requirements by tomorrow afternoon, and Arun will deliver a database scaling proposal before Wednesday. Analytics APIs were designated as the highest priority after authentication.",
     "participants": [
         {
             "name": "Rahul",
@@ -307,54 +299,81 @@ content = """
         }
     ],
     "decisions": [
-        "Analytics APIs become the highest priority after authentication.",
-        "Rahul will speak with the product manager today and get the finalized requirements document by tomorrow afternoon.",
-        "The team will meet again next Tuesday."
+        "Analytics APIs become the highest priority after authentication."
     ],
     "risks": [
         {
-            "description": "Database utilization is at eighty-two percent and may hit storage limits within the next six to eight weeks.",
+            "description": "Database utilization is at 82% and may hit storage limits within the next six to eight weeks.",
             "owner": "Arun"
         },
         {
-            "description": "Final leave management requirements are not yet received, which could block dashboard screens.",
+            "description": "Final leave management requirements are not yet received, impacting dashboard screens.",
             "owner": "Priya"
         }
     ],
     "tasks": [
         {
-            "title": "Prepare database scaling proposal",
-            "description": "Create and share a proposal for scaling the database to handle projected growth.",
-            "priority": "MEDIUM",
+            "title": "Complete role-based access control (RBAC)",
+            "description": "Implement RBAC for the authentication service.",
+            "priority": "HIGH",
             "completed": false,
             "assignee_id": 1,
             "assigned_by": "Rahul",
+            "deadline": "2026-07-05T23:59:59",
+            "deadline_text": "by Friday"
+        },
+        {
+            "title": "Deploy authentication service to staging",
+            "description": "Deploy the completed authentication service to the staging environment.",
+            "priority": "HIGH",
+            "completed": false,
+            "assignee_id": 1,
+            "assigned_by": "Rahul",
+            "deadline": "2026-07-05T18:00:00",
+            "deadline_text": "Friday evening"
+        },
+        {
+            "title": "Complete authentication testing",
+            "description": "Test the authentication service after deployment.",
+            "priority": "MEDIUM",
+            "completed": false,
+            "assignee_id": 2,
+            "assigned_by": "Rahul",
             "deadline": "2026-07-06T23:59:59",
+            "deadline_text": "by Monday"
+        },
+        {
+            "title": "Obtain finalized leave management requirements",
+            "description": "Gather the final leave management requirements from the product team.",
+            "priority": "MEDIUM",
+            "completed": false,
+            "assignee_id": 0,
+            "assigned_by": "Rahul",
+            "deadline": "2026-07-03T15:00:00",
+            "deadline_text": "by tomorrow afternoon"
+        },
+        {
+            "title": "Prepare database scaling proposal",
+            "description": "Create a proposal for scaling the database to handle future growth.",
+            "priority": "MEDIUM",
+            "completed": false,
+            "assignee_id": 4,
+            "assigned_by": "Rahul",
+            "deadline": "2026-07-08T00:00:00",
             "deadline_text": "before Wednesday"
+        },
+        {
+            "title": "Start analytics APIs development",
+            "description": "Begin development of analytics APIs after authentication deployment.",
+            "priority": "HIGH",
+            "completed": false,
+            "assignee_id": 1,
+            "assigned_by": "Rahul",
+            "deadline": null,
+            "deadline_text": null
         }
     ]
 }
 """
 print(content)
 data = json.loads(content)
-
-print(data["summary"])
-print(data["tasks"])
-db = SessionLocal()
-try:
-    for task in data["tasks"]:
-        create_task_db(
-            TaskRequest(
-                title=task["title"],
-                description=task["description"],
-                priority=task["priority"],
-                manager_id=1,
-                assignee_id=task["assignee_id"],
-                deadline=task["deadline"],
-                deadline_text=task["deadline_text"],
-                completed=task["completed"]
-            ),
-            db
-        )
-finally:
-    db.close()
