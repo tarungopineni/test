@@ -38,29 +38,45 @@ class UserRequest(BaseModel):
     role:str
 
 @router.post("/create",status_code=status.HTTP_201_CREATED)
-async def create_user(db:db_dependency,user:UserRequest):
-    user.hashed_password = bcrypt_context.hash(user.hashed_password)
-    final_model = Users(**user.model_dump())
+async def create_user(db:db_dependency,user_req:UserRequest,user:user_dependency):
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,detail = "user not authenticated")
+    if user["role"] != "coordinator":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,detail = "user not authorized")
+    user_req.hashed_password = bcrypt_context.hash(user_req.hashed_password)
+    final_model = Users(**user_req.model_dump())
     db.add(final_model)
     db.commit()
     return {"message": "User inserted!!"}
 
 @router.get("/get_users",status_code=status.HTTP_200_OK)
-async def get_all_users(db: db_dependency):
+async def get_all_users(db: db_dependency,user:user_dependency):
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,detail = "user not authenticated")
+    if user["role"] != "coordinator":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,detail = "user not authorized")
     return db.query(Users).all()
 
 @router.get("/get_user/{user_id}",status_code=status.HTTP_200_OK)
-async def get_user_by_id(db:db_dependency,user_id:int):
+async def get_user_by_id(db:db_dependency,user_id:int,user:user_dependency):
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,detail = "user not authenticated")
+    if user["role"] != "coordinator":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,detail = "user not authorized")
     model = db.query(Users).filter(Users.id == user_id).first()
     if model is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,detail="user not found")
     return model
 
 @router.put("/update_user/{user_id}",status_code=status.HTTP_204_NO_CONTENT)
-async def update_user(user:user_dependency,db:db_dependency,req:UserRequest):
+async def update_user(user:user_dependency,db:db_dependency,req:UserRequest,user_id:int):
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,detail = "user not authenticated")
-    model = db.query(Users).filter(Users.id == user["id"]).first()
+    if user["role"] != "coordinator":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,detail = "user not authorized")
+    model = db.query(Users).filter(Users.id == user_id).first()
+    if model is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,detail="user not found")
     model.manager_id = req.manager_id
     model.name = req.name
     model.email = req.email
@@ -73,15 +89,23 @@ async def update_user(user:user_dependency,db:db_dependency,req:UserRequest):
     db.commit()
 
 @router.put("/update_user_manager/{user_id}",status_code=status.HTTP_204_NO_CONTENT)
-async def update_user_manager(user:user_dependency,db:db_dependency,manager_id: int):
+async def update_user_manager(user:user_dependency,db:db_dependency,manager_id: int,user_id:int):
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,detail = "user not authenticated")
-    model = db.query(Users).filter(Users.id == user["id"]).first()
+    if user["role"] != "coordinator":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,detail = "user not authorized")
+    model = db.query(Users).filter(Users.id == user_id).first()
     if model is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,detail="user not found")
-    manager = db.query(Users).filter(Users.id == manager_id).first()
-    if manager is None:
+    if model.id == manager_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,detail="user cannot be assigned to themselves")
+    manager_model = db.query(Users).filter(Users.id == manager_id).first()
+    if manager_model is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,detail="manager not found")
+    if manager_model.manager_id == model.id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,detail="user cannot be assigned to a subordinate")
+    if manager_model.role != "manager":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,detail="provided manager_id does not belong to a manager")
     model.manager_id = manager_id
     db.add(model)
     db.commit()
@@ -90,6 +114,8 @@ async def update_user_manager(user:user_dependency,db:db_dependency,manager_id: 
 async def delete_user(user:user_dependency,db:db_dependency,user_id:int):
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,detail = "user not authenticated")
+    if user["role"] != "coordinator":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,detail = "user not authorized")
     model = db.query(Users).filter(Users.id == user_id).first()
     if model is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,detail="user not found")
@@ -100,5 +126,7 @@ async def delete_user(user:user_dependency,db:db_dependency,user_id:int):
 async def get_team(user:user_dependency,db:db_dependency):
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,detail = "user not authenticated")
+    if user["role"] != "manager":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,detail = "user not authorized")
     model = db.query(Users).filter(Users.manager_id == user["id"]).all()
     return model

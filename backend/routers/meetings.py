@@ -1,5 +1,5 @@
 from typing_extensions import Annotated
-
+import whisper
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from ..database import SessionLocal
@@ -18,6 +18,32 @@ import os
     # openrouter
 
 load_dotenv()
+
+def transcribe_audio(audio_path: str, whisper_model: str = "medium") -> str:
+    """
+    Convert audio to English text using Whisper.
+    """
+
+    print("\nLoading Whisper model...")
+
+    model = whisper.load_model(whisper_model)
+
+    start_time = datetime.now()
+
+    result = model.transcribe(
+        audio_path,
+        task="translate",  # Translate non-English speech to English
+        fp16=False
+    )
+
+    end_time = datetime.now()
+
+    elapsed = (end_time - start_time).total_seconds()
+
+    print(f"\nTranscription completed in {elapsed:.2f} seconds")
+    print(f"Detected language: {result['language']}")
+
+    return result["text"]
 
 def generate_summary(transcript: str,meeting_datetime: str,team_members: dict) -> str:
     """
@@ -491,6 +517,8 @@ def create_tasks_from_summary(
 @router.post("/create")
 async def create_meeting(title: str,db: db_dependency,transcript:str):
     d = {u.name: u.id for u in db.query(Users).all()}
+    audio_file = 'meeting_audio.mp3'
+    # transcript = transcribe_audio(audio_path=audio_file)
     # content = generate_summary(transcript,datetime.now().isoformat(),d)
     data = json.loads(content)
     meeting = Meetings(
