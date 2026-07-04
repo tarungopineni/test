@@ -8,8 +8,73 @@ from typing import Annotated
 from sqlalchemy.orm import Session
 from fastapi import Depends
 from backend.database import SessionLocal
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
 load_dotenv()
+
+from datetime import datetime
+
+def generate_task_completion_email(
+    employee_id: int,
+    employee_name: str,
+    employee_role: str,
+    task_id: int,
+    task_title: str,
+    task_description: str,
+    completed_at: datetime | str
+):
+    subject = f"Task Completed: {task_title}"
+
+    body = f"""
+Dear Manager,
+
+This is to inform you that a task has been marked as completed by one of your team members.
+
+Employee Details
+----------------
+Employee ID   : {employee_id}
+Employee Name : {employee_name}
+Role          : {employee_role}
+
+Task Details
+------------
+Task ID          : {task_id}
+Task Title       : {task_title}
+Task Description : {task_description}
+
+Completion Details
+------------------
+Completed At : {completed_at}
+
+Please review the completed work if verification or approval is required.
+
+Regards,
+Task Management System
+""".strip()
+
+    return subject, body
+
+def send_email(sender_email: str,app_password: str,receiver_email: str,subject: str,body: str) -> bool:
+    try:
+        message = MIMEMultipart()
+        message["From"] = sender_email
+        message["To"] = receiver_email
+        message["Subject"] = subject
+
+        message.attach(MIMEText(body, "plain"))
+
+        with smtplib.SMTP("smtp.gmail.com", 587) as server:
+            server.starttls()
+            server.login(sender_email, app_password)
+            server.send_message(message)
+
+        return True
+
+    except Exception as e:
+        print(f"Failed to send email: {e}")
+        return False
 
 def generate_summary(transcript: str,meeting_datetime: str,team_members: dict) -> str:
     """

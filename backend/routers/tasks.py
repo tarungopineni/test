@@ -1,18 +1,19 @@
+import os
 from fastapi import APIRouter
 from ..database import SessionLocal
-from passlib.context import CryptContext
-from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
 from typing import Annotated
 from sqlalchemy.orm import Session
-from fastapi import Depends, HTTPException,Request
+from fastapi import Depends, HTTPException
 import datetime
-from datetime import timezone,timedelta
-from jose import jwt
+from dotenv import load_dotenv
+from datetime import timedelta
 from pydantic import BaseModel
 from ..models import *
-from jose import jwt, JWTError
 from starlette import status
 from .auth import get_current_user
+from .emails import *
+
+load_dotenv()
 
 router = APIRouter(
     prefix="/tasks",
@@ -24,14 +25,8 @@ def get_db():
     try:
         yield db
     finally:
-        db.close()
+        db.close() 
 
-oauth2_bearer = OAuth2PasswordBearer(tokenUrl='tasks/token')
-
-SECRET_KEY = 'QWER234DFG456CVBN543'
-ALGORITHM = 'HS256' 
-     
-bcrypt_context = CryptContext(schemes=['bcrypt'], deprecated='auto')
 db_dependency = Annotated[Session, Depends(get_db)]
 user_dependency = Annotated[dict,Depends(get_current_user)]
 
@@ -44,14 +39,16 @@ class TaskRequest(BaseModel):
     assignee_id:int
     deadline: datetime | None = None
     deadline_text: str | None = None
+    verified_by_manager: bool = False
 
 class TaskStatusRequest(BaseModel):
     title:str
     description:str
     priority:str
     completed:bool
+    verified_by_manager: bool
 
-def create_task_db(task: TaskRequest, db):
+async def create_task_db(task: TaskRequest, db):
     model = Tasks(
         title=task.title,
         description=task.description,
@@ -60,57 +57,136 @@ def create_task_db(task: TaskRequest, db):
         assignee_id=task.assignee_id,
         deadline=task.deadline,
         deadline_text=task.deadline_text,
+        verified_by_manager=task.verified_by_manager
     )
     db.add(model)
     db.commit()
 
-@router.post("/create_task",status_code=status.HTTP_201_CREATED)
-async def create_task(user:user_dependency,task:TaskRequest,db:db_dependency):
-    return create_task_db(task,db)
+@router.get("/get_verified_tasks",status_code=status.HTTP_200_OK)
+async def get_all_verified_tasks(user:user_dependency,db:db_dependency):
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,detail = "user not authenticated")
+    return db.query(Tasks).filter(Tasks.assignee_id == user["id"], Tasks.verified_by_manager == True).all()
 
-@router.get("/get_tasks",status_code=status.HTTP_200_OK)
-async def get_all_tasks(user:user_dependency,db:db_dependency):
-    return db.query(Tasks).filter(Tasks.assignee_id == user["id"]).all()
+@router.get("/get_not_verified_tasks",status_code=status.HTTP_200_OK)
+async def get_all_not_verified_tasks(user:user_dependency,db:db_dependency):
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,detail = "user not authenticated")
+    return db.query(Tasks).filter(Tasks.assignee_id == user["id"], Tasks.verified_by_manager == False).all()
 
-@router.get("/get_task/{task_id}",status_code=status.HTTP_200_OK)
-async def get_task_by_id(user:user_dependency,task_id:int,db:db_dependency):
+@router.get("/get_yet_to_be_verified_tasks",status_code=status.HTTP_200_OK)
+async def get_all_yet_to_be_verified_tasks(user:user_dependency,db:db_dependency):
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,detail = "user not authenticated")
+    if user["role"] != "manager":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,detail="You are not authorized to view tasks for this employee")
+    return db.query(Tasks).filter(Tasks.manager_id == user["id"], Tasks.verified_by_manager == False).all()
+
+@router.get("/performance_report_user",status_code=status.HTTP_200_OK)
+async def get_performance_report_user(user:user_dependency,db:db_dependency):
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,detail = "user not authenticated")
+    total_tasks = db.query(Tasks).filter(Tasks.assignee_id == user["id"],Tasks.verified_by_manager == True).count()
+    completed_tasks = db.query(Tasks).filter(Tasks.assignee_id == user["id"], Tasks.completed == True,Tasks.verified_by_manager == True).count()
+    pending_tasks = total_tasks - completed_tasks
+    return {
+        "total_tasks": total_tasks,
+        "completed_tasks": completed_tasks,
+        "pending_tasks": pending_tasks,
+        "completion_percentage": f"{(completed_tasks / total_tasks * 100) if total_tasks > 0 else 0:.2f}%"
+    }
+
+@router.get("/get_team_performance",status_code=status.HTTP_200_OK)
+async def get_team_performance(user:user_dependency,db:db_dependency):
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,detail = "user not authenticated")
+    if user["role"] != "manager":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,detail="You are not authorized to view team performance reports")
+    total_tasks = db.query(Tasks).filter(Tasks.manager_id == user["id"],Tasks.verified_by_manager == True).count()
+    completed_tasks = db.query(Tasks).filter(Tasks.manager_id == user["id"],Tasks.completed == True,Tasks.verified_by_manager == True).count()
+    pending_tasks = total_tasks - completed_tasks
+    return {
+        "total_tasks": total_tasks,
+        "completed_tasks": completed_tasks,
+        "pending_tasks": pending_tasks,
+        "completion_percentage": f"{(completed_tasks / total_tasks * 100) if total_tasks > 0 else 0:.2f}%"
+    }
+
+@router.get("/overdue_tasks")
+async def get_overdue_tasks(user: user_dependency, db: db_dependency):
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not authenticated")
+    return db.query(Tasks).filter(
+        Tasks.assignee_id == user["id"],
+        Tasks.deadline != None,
+        Tasks.deadline < datetime.now(),
+        Tasks.completed == False
+    ).all()
+
+@router.put("/change_priority/{task_id}",status_code=status.HTTP_204_NO_CONTENT)
+async def change_task_priority(user:user_dependency,task_id:int,new_priority:str,db:db_dependency):
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,detail = "user not authenticated")
+    valid_priorities = ["HIGH", "MEDIUM", "LOW"]
+    new_priority = new_priority.upper()
+    if new_priority not in valid_priorities:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,detail="Invalid priority")
     model = db.query(Tasks).filter(Tasks.id == task_id).first()
-    if model is None:
+    if model is None or model.manager_id != user["id"]:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,detail="task not found")
-    return model
+    model.priority = new_priority
+    db.commit()
+
+@router.put("/verify_task/{task_id}",status_code=status.HTTP_204_NO_CONTENT)
+async def verify_task(user:user_dependency,task_id:int,db:db_dependency):
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,detail = "user not authenticated")
+    model = db.query(Tasks).filter(Tasks.id == task_id).first()
+    if model is None or model.manager_id != user["id"]:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,detail="task not found")
+    model.verified_by_manager = True
+    db.commit()
 
 @router.put("/update_task/{task_id}",status_code=status.HTTP_204_NO_CONTENT)
 async def update_task(user:user_dependency,task_id:int,task:TaskRequest,db:db_dependency):
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,detail = "user not authenticated")
     model = db.query(Tasks).filter(Tasks.id == task_id).first()
-    if model is None:
+    if model is None or user["role"] != "manager" or model.manager_id != user["id"]:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,detail="task not found")
     model.title = task.title
     model.description = task.description
     model.priority = task.priority
     model.completed = task.completed
-    model.manager_id = task.manager_id
+    model.manager_id = user["id"]
     model.assignee_id = task.assignee_id
     model.deadline = task.deadline
     model.deadline_text = task.deadline_text
+    model.verified_by_manager = task.verified_by_manager
     db.commit()
 
 @router.delete("/delete_task/{task_id}",status_code=status.HTTP_204_NO_CONTENT)
 async def delete_task(user:user_dependency,task_id:int,db:db_dependency):
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,detail = "user not authenticated")
     model = db.query(Tasks).filter(Tasks.id == task_id).first()
-    if model is None:
+    if model is None or model.manager_id != user["id"]:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,detail="task not found")
     db.delete(model)
     db.commit()
 
 @router.put("/update_task_status/{task_id}",status_code=status.HTTP_204_NO_CONTENT)
 async def update_task_status(user:user_dependency,task_id:int,task:TaskStatusRequest,db:db_dependency):
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,detail = "user not authenticated")
     model = db.query(Tasks).filter(Tasks.id == task_id).first()
-    if model is None:
+    if model is None or user["role"] != "manager" or model.manager_id != user["id"]:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,detail="task not found")
     model.title = task.title
     model.description = task.description
     model.priority = task.priority
     model.completed = task.completed
+    model.verified_by_manager = task.verified_by_manager
     db.commit()
 
 @router.post("/assign_task_to_employee/{employee_id}",status_code=status.HTTP_204_NO_CONTENT)
@@ -118,11 +194,165 @@ async def assign_task_to_employee(user:user_dependency,employee_id:int,task:Task
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,detail = "user not authenticated")
     model = db.query(Users).filter(Users.id == employee_id).first()
-    if model is None:
+    if model is None or model.manager_id != user["id"]:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,detail="employee not found")
-    if model.manager_id != user["id"]:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,detail="You are not authorized to assign tasks to this employee")
     task.assignee_id = employee_id
     task.manager_id = user["id"]
     create_task_db(task,db)
+
+@router.get("/get_staff_tasks",status_code=status.HTTP_200_OK)
+async def get_tasks_for_employee(user:user_dependency,db:db_dependency):
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,detail = "user not authenticated")
+    if user["role"] != "manager":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,detail="You are not authorized to view tasks for this employee")
+    staff = db.query(Tasks).filter(Tasks.manager_id == user["id"]).all()
+    return staff
+
+@router.put("/mark_task_completed/{task_id}",status_code=status.HTTP_204_NO_CONTENT)
+async def mark_task_completed(user:user_dependency,task_id:int,db:db_dependency):
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,detail = "user not authenticated")
+    model = db.query(Tasks).filter(Tasks.id == task_id,Tasks.assignee_id == user["id"]).first()
+    if model is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,detail="task not found")
+    if model.completed:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,detail="task is already marked as completed")
+    model.completed = True
+    manager_model = db.query(Users).filter(Users.id == model.manager_id).first()
     db.commit()
+    email_text = generate_task_completion_email(
+        employee_id=user["id"],
+        employee_name=user["username"],
+        employee_role=user["role"],
+        task_id=model.id,
+        task_title=model.title,
+        task_description=model.description,
+        completed_at=datetime.now().isoformat()
+    )
+    try:
+        send_email(
+            sender_email="tarungopineni@gmail.com",
+            app_password=os.getenv("EMAIL_APP_PASS"),
+            receiver_email=manager_model.email,
+            subject=email_text[0],
+            body=email_text[1]
+        )
+    except Exception as e:
+        print("Error sending email:", e)
+
+@router.get("/task-warnings", status_code=status.HTTP_200_OK)
+async def get_task_warnings(user: user_dependency,db: db_dependency):
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,detail="User not authenticated")
+    now = datetime.now()
+    warning_deadline = now + timedelta(days=1)
+    tasks = (db.query(Tasks).filter(Tasks.assignee_id == user["id"],Tasks.completed == False,Tasks.deadline != None,Tasks.deadline <= warning_deadline).all())
+
+    warnings = []
+
+    for task in tasks:
+        time_remaining = task.deadline - now
+        if timedelta(0) <= time_remaining <= timedelta(days=1):
+
+            warnings.append({
+                "task_id": task.id,
+                "title": task.title,
+                "description": task.description,
+                "priority": task.priority,
+                "deadline": task.deadline,
+                "remaining_hours": round(time_remaining.total_seconds() / 3600, 2),
+                "deadline_text": task.deadline_text,
+                "is_overdue": time_remaining.total_seconds() < 0
+            })
+
+    return warnings
+
+@router.get("/manager/task-warnings", status_code=status.HTTP_200_OK)
+async def get_manager_task_warnings(
+    user: user_dependency,
+    db: db_dependency
+):
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,detail="User not authenticated")
+    if user["role"] != "manager":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,detail="User not authorized to view task warnings")
+    now = datetime.now()
+    warning_deadline = now + timedelta(days=1)
+
+    tasks = (
+        db.query(Tasks).filter(Tasks.manager_id == user["id"],Tasks.completed == False,Tasks.deadline != None,Tasks.deadline <= warning_deadline).all())
+
+    warnings = []
+
+    for task in tasks:
+        time_remaining = task.deadline - now
+        if timedelta(0) <= time_remaining <= timedelta(days=1):
+
+            warnings.append({
+                "task_id": task.id,
+                "title": task.title,
+                "description": task.description,
+                "priority": task.priority,
+                "assignee_id": task.assignee_id,
+                "deadline": task.deadline,
+                "deadline_text": task.deadline_text,
+                "remaining_hours": round(
+                    time_remaining.total_seconds() / 3600,
+                    2
+                ),
+                "is_overdue": time_remaining.total_seconds() < 0
+            })
+
+    return warnings
+
+@router.post("/send-warning-emails", status_code=status.HTTP_200_OK)
+async def send_warning_emails(user: user_dependency,db: db_dependency):
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,detail="User not authenticated")
+    if user["role"] != "manager":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,detail="User not authorized to send warning emails")
+    now = datetime.now()
+    warning_deadline = now + timedelta(days=1)
+    tasks = (
+        db.query(Tasks)
+        .filter(
+            Tasks.completed == False,
+            Tasks.deadline != None,
+            Tasks.deadline <= warning_deadline,
+            Tasks.manager_id == user["id"]
+        ).all()
+    )
+    emails_sent = 0
+    for task in tasks:
+        employee = (
+            db.query(Users)
+            .filter(Users.id == task.assignee_id)
+            .first()
+        )
+        if employee is None or not employee.email:
+            continue
+        remaining_hours = round((task.deadline - now).total_seconds() / 3600,2)
+        subject, body = generate_task_warning_email(
+            employee_name=employee.username,
+            employee_role=employee.role,
+            task_id=task.id,
+            task_title=task.title,
+            task_description=task.description,
+            deadline=str(task.deadline),
+            remaining_hours=remaining_hours
+        )
+        try:
+            send_email(
+                sender_email="tarungopineni@gmail.com",
+                app_password=os.getenv('EMAIL_APP_PASS'),
+                receiver_email=employee.email,
+                subject=subject,
+                body=body
+            )
+            emails_sent += 1
+        except Exception as e:
+            print(f"Failed to send email for task {task.id}: {e}")
+    return {
+        "message": f"{emails_sent} warning emails sent"
+    }

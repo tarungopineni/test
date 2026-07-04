@@ -16,7 +16,6 @@ class Users(Base):
     is_active = Column(Boolean, default=True)
     role = Column(String, nullable=False)
 
-
 class Tasks(Base):
     __tablename__ = "tasks"
     id = Column(Integer, primary_key=True, index=True)
@@ -34,6 +33,7 @@ class Tasks(Base):
         default=datetime.utcnow,
         onupdate=datetime.utcnow
     )
+    verified_by_manager = Column(Boolean, default=False, nullable=False)
 
 class Meetings(Base):
     __tablename__ = "meetings"

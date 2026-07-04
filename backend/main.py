@@ -1,7 +1,6 @@
 from fastapi import FastAPI
 from .routers import auth,users,tasks,meetings
 from .database import Base,engine
-from . import models
 
 app = FastAPI()
 

@@ -1,16 +1,19 @@
+import os
 from fastapi import APIRouter
 from ..database import SessionLocal
 from passlib.context import CryptContext
 from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
 from typing import Annotated
 from sqlalchemy.orm import Session
-from fastapi import Depends, HTTPException,Request
+from fastapi import Depends, HTTPException
 import datetime
 from datetime import timezone,timedelta
-from jose import jwt
-from ..models import *
+from ..models import Users
 from jose import jwt, JWTError
 from starlette import status
+from dotenv import load_dotenv
+
+load_dotenv()
 
 router = APIRouter(
     prefix="/auth",
@@ -25,11 +28,9 @@ def get_db():
         db.close()
 
 oauth2_bearer = OAuth2PasswordBearer(tokenUrl='auth/token')
-
-SECRET_KEY = 'QWER234DFG456CVBN543'
 ALGORITHM = 'HS256'
 
-def create_access_token(username: str,user_id: int,role: str,expires_delta: timedelta):
+async def create_access_token(username: str,user_id: int,role: str,expires_delta: timedelta):
     encode = {
         "sub": username,
         "id": user_id,
@@ -39,15 +40,19 @@ def create_access_token(username: str,user_id: int,role: str,expires_delta: time
     encode.update({"exp": expires})
     return jwt.encode(
         encode,
-        SECRET_KEY,
+        SECRET_KEY = os.getenv("SECRET_KEY"),
         algorithm=ALGORITHM
     )
 
-def authenticate(username, password, db):
+async def authenticate(username:str, password:str, db: Session):
     model = db.query(Users).filter(Users.username == username).first()
     if model is None:
         return None
-    if not bcrypt_context.verify(password,model.hashed_password):
+    result = bcrypt_context.verify(
+        password,
+        model.hashed_password
+    )
+    if not result:
         return None
     return model
 
@@ -55,18 +60,18 @@ async def get_current_user(token: Annotated[str, Depends(oauth2_bearer)]):
     try:
         payload = jwt.decode(
             token,
-            SECRET_KEY,
+            os.getenv("SECRET_KEY"),
             algorithms=[ALGORITHM]
         )
         username = payload.get("sub")
         user_id = payload.get("id")
         user_role = payload.get("role")
-        if username is None or user_id is None:
+        if username is None or user_id is None or user_role is None:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,detail="Could not validate user")
         return {
             "username": username,
             "id": user_id,
-            "user_role": user_role
+            "role": user_role
         }
     except JWTError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,detail="Could not validate user") 
@@ -87,7 +92,7 @@ async def login(db: db_dependency,form_data: Annotated[OAuth2PasswordRequestForm
         user.username,
         user.id,
         user.role,
-        timedelta(minutes=20)
+        timedelta(minutes=60)
     )
     return {
         "access_token": token,
