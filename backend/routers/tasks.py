@@ -48,7 +48,7 @@ class TaskStatusRequest(BaseModel):
     completed:bool
     verified_by_manager: bool
 
-async def create_task_db(task: TaskRequest, db):
+def create_task_db(task: TaskRequest, db):
     model = Tasks(
         title=task.title,
         description=task.description,
@@ -147,6 +147,17 @@ async def verify_task(user:user_dependency,task_id:int,db:db_dependency):
     model.verified_by_manager = True
     db.commit()
 
+@router.put("/reject_task/{task_id}",status_code=status.HTTP_204_NO_CONTENT)
+async def reject_task(user:user_dependency,task_id:int,db:db_dependency):
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,detail = "user not authenticated")
+    model = db.query(Tasks).filter(Tasks.id == task_id).first()
+    if model is None or model.manager_id != user["id"]:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,detail="task not found")
+    model.completed = False
+    model.verified_by_manager = False
+    db.commit()
+
 @router.put("/update_task/{task_id}",status_code=status.HTTP_204_NO_CONTENT)
 async def update_task(user:user_dependency,task_id:int,task:TaskRequest,db:db_dependency):
     if not user:
@@ -204,10 +215,11 @@ async def assign_task_to_employee(user:user_dependency,employee_id:int,task:Task
 async def get_tasks_for_employee(user:user_dependency,db:db_dependency):
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,detail = "user not authenticated")
-    if user["role"] != "manager":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,detail="You are not authorized to view tasks for this employee")
-    staff = db.query(Tasks).filter(Tasks.manager_id == user["id"]).all()
-    return staff
+    if user["role"] not in ["manager", "coordinator"]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,detail="You are not authorized to view tasks")
+    if user["role"] == "coordinator":
+        return db.query(Tasks).all()
+    return db.query(Tasks).filter(Tasks.manager_id == user["id"]).all()
 
 @router.put("/mark_task_completed/{task_id}",status_code=status.HTTP_204_NO_CONTENT)
 async def mark_task_completed(user:user_dependency,task_id:int,db:db_dependency):
@@ -310,20 +322,22 @@ async def get_manager_task_warnings(
 async def send_warning_emails(user: user_dependency,db: db_dependency):
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,detail="User not authenticated")
-    if user["role"] != "manager":
+    if user["role"] not in ["manager", "coordinator"]:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,detail="User not authorized to send warning emails")
     now = datetime.now()
     warning_deadline = now + timedelta(days=1)
-    tasks = (
-        db.query(Tasks)
-        .filter(
-            Tasks.completed == False,
-            Tasks.deadline != None,
-            Tasks.deadline <= warning_deadline,
-            Tasks.manager_id == user["id"]
-        ).all()
+    
+    query = db.query(Tasks).filter(
+        Tasks.completed == False,
+        Tasks.deadline != None,
+        Tasks.deadline <= warning_deadline
     )
+    if user["role"] == "manager":
+        query = query.filter(Tasks.manager_id == user["id"])
+        
+    tasks = query.all()
     emails_sent = 0
+    
     for task in tasks:
         employee = (
             db.query(Users)
@@ -343,16 +357,24 @@ async def send_warning_emails(user: user_dependency,db: db_dependency):
             remaining_hours=remaining_hours
         )
         try:
-            send_email(
+            success = send_email(
                 sender_email="tarungopineni@gmail.com",
                 app_password=os.getenv('EMAIL_APP_PASS'),
                 receiver_email=employee.email,
                 subject=subject,
                 body=body
             )
-            emails_sent += 1
+            if success:
+                emails_sent += 1
         except Exception as e:
             print(f"Failed to send email for task {task.id}: {e}")
+            
+    if len(tasks) > 0 and emails_sent == 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Failed to send any warning emails. Please check SMTP app password configs in backend .env."
+        )
+        
     return {
         "message": f"{emails_sent} warning emails sent"
     }

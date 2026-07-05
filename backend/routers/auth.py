@@ -6,7 +6,7 @@ from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
 from typing import Annotated
 from sqlalchemy.orm import Session
 from fastapi import Depends, HTTPException
-import datetime
+from datetime import datetime
 from datetime import timezone,timedelta
 from ..models import Users
 from jose import jwt, JWTError
@@ -40,12 +40,12 @@ async def create_access_token(username: str,user_id: int,role: str,expires_delta
     encode.update({"exp": expires})
     return jwt.encode(
         encode,
-        SECRET_KEY = os.getenv("SECRET_KEY"),
+        os.getenv("SECRET_KEY"),
         algorithm=ALGORITHM
     )
 
 async def authenticate(username:str, password:str, db: Session):
-    model = db.query(Users).filter(Users.username == username).first()
+    model = db.query(Users).filter(Users.username.ilike(username)).first()
     if model is None:
         return None
     result = bcrypt_context.verify(
@@ -82,13 +82,13 @@ user_dependency = Annotated[dict,Depends(get_current_user)]
 
 @router.post("/token",status_code=status.HTTP_200_OK)
 async def login(db: db_dependency,form_data: Annotated[OAuth2PasswordRequestForm,Depends()]):
-    user = authenticate(form_data.username,form_data.password,db)
+    user = await authenticate(form_data.username,form_data.password,db)
     if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Could not validate"
         )
-    token = create_access_token(
+    token = await create_access_token(
         user.username,
         user.id,
         user.role,

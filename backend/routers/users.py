@@ -134,25 +134,30 @@ async def update_user(user:user_dependency,db:db_dependency,req:UpdateUserReques
     model = db.query(Users).filter(Users.id == user_id).first()
     if model is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,detail="user not found")
-    manager_model = db.query(Users).filter(Users.id == req.manager_id).first()
-    if manager_model is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,detail="manager not found")
-    if manager_model.role!="manager":
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,detail="provided id do not belong to manager")
+    
+    if req.manager_id is not None and req.manager_id != 0:
+        manager_model = db.query(Users).filter(Users.id == req.manager_id).first()
+        if manager_model is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,detail="manager not found")
+        if manager_model.role != "manager":
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,detail="provided id do not belong to manager")
+        if req.manager_id == user_id:
+            raise HTTPException(status_code=400,detail="user cannot be assigned to themselves")
+        if manager_model.manager_id == user_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="user cannot be assigned to a subordinate"
+            )
+        model.manager_id = req.manager_id
+    else:
+        model.manager_id = None
+
     existing_email = db.query(Users).filter(Users.email == req.email,Users.id != user_id).first()
     if existing_email:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,detail="email already exists")
-    if req.manager_id == user_id:
-        raise HTTPException(status_code=400,detail="user cannot be assigned to themselves")
-    if manager_model.manager_id == user_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="user cannot be assigned to a subordinate"
-        )
     model.name = req.name
     model.email = req.email
     model.first_name = req.first_name
-    model.manager_id = req.manager_id
     model.last_name = req.last_name
     model.role = req.role
     db.commit()
@@ -191,6 +196,7 @@ async def delete_user(user:user_dependency,db:db_dependency,user_id:int):
         staff = db.query(Users).filter(Users.manager_id == user_id).first()
         if staff:
             raise HTTPException(status_code=400,detail="manager has assigned employees")
+    db.query(Tasks).filter((Tasks.assignee_id == user_id) | (Tasks.manager_id == user_id)).delete(synchronize_session=False)
     db.delete(model)
     db.commit()
 

@@ -20,13 +20,19 @@ import shutil
 
 load_dotenv()
 
-model = whisper.load_model("medium")
+model = None
 def transcribe_audio(audio_path: str) -> str:
     """
     Convert audio to English text using Whisper.
     """
-
-    print("\nLoading Whisper model...")
+    global model
+    if model is None:
+        print("\nLoading Whisper model...")
+        try:
+            model = whisper.load_model("medium")
+        except Exception as e:
+            print(f"Failed to load Whisper 'medium' model: {e}. Falling back to 'small'.")
+            model = whisper.load_model("small")
 
 
     start_time = datetime.now()
